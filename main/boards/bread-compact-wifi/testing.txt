@@ -1,0 +1,72 @@
+if (strcmp(type->valuestring, "tts") == 0) {
+    auto state = cJSON_GetObjectItem(root, "state");
+    if (strcmp(state->valuestring, "start") == 0) {
+        Schedule([this]() {
+            aborted_ = false;
+            // ★ 核心修改：如果是静音模式，不进入 Speaking，直接结束对话 ★
+            if (silent_mode_) {
+                // 1. 通知服务器停止发送 TTS（避免后续数据继续到达）
+                if (protocol_) {
+                    protocol_->SendAbortSpeaking(kAbortReasonNone);
+                }
+                // 2. 直接回到空闲状态（或聆听状态，取决于你的需求）
+                //    这里我们回到 Idle，以便用户需要再次唤醒。
+                //    如果想要连续对话，可以改为 SetDeviceState(kDeviceStateListening)，
+                //    但需要确保通道已经打开（可能打开状态，也可能未打开）。
+                //    为了简单，我们切到 Idle，让用户重新唤醒。
+                SetDeviceState(kDeviceStateIdle);
+                // 3. 可选：如果希望保持聆听状态（连续对话），可以改为：
+                // SetDeviceState(kDeviceStateListening);
+                return; // 跳过后面的正常逻辑
+            }
+            // 正常模式：切换到 Speaking
+            SetDeviceState(kDeviceStateSpeaking);
+        });
+    } else if (strcmp(state->valuestring, "stop") == 0) {
+        // ... 保持不变 ...
+    } else if (strcmp(state->valuestring, "sentence_start") == 0) {
+        // ... 保持不变 ...
+    }
+}
+
+
+
+//506
+
+void SetSilentMode(bool enable) { silent_mode_ = enable; }
+bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait) {
+    // ★ 静音模式：直接丢弃包，不进行任何队列操作 ★
+    if (silent_mode_) {
+        ESP_LOGD(TAG, "Silent mode: dropping audio packet");
+        return true;  // 返回 true 表示"已处理"，避免上层重试
+    }
+
+    std::unique_lock<std::mutex> lock(audio_queue_mutex_);
+    // ... 原有逻辑不变 ...
+}
+// 在 mcp_server.cc 的 system.set_silent_mode 工具回调中
+auto& app = Application::GetInstance();
+app.silent_mode_ = enabled;
+app.GetAudioService().SetSilentMode(enabled);  // 同步到音频服务
+//new way 
+
+if (strcmp(state->valuestring, "start") == 0) {
+    Schedule([this]() {
+        if (silent_mode_) {
+            // 1. 通知服务器停止 TTS
+            if (protocol_) {
+                protocol_->SendAbortSpeaking(kAbortReasonNone);
+            }
+            // 2. 根据 listening_mode_ 决定去 Idle 还是 Listening
+            if (listening_mode_ == kListeningModeManualStop) {
+                SetDeviceState(kDeviceStateIdle);
+            } else {
+                SetDeviceState(kDeviceStateListening);
+            }
+            return;
+        }
+        // 正常模式
+        aborted_ = false;
+        SetDeviceState(kDeviceStateSpeaking);
+    });
+}
