@@ -1,6 +1,6 @@
 #include "car_controller.h"
 
-
+int x=1+1;
 
 TaskHandle_t CarController::motor_ctrl_task_handle_ = nullptr;
 
